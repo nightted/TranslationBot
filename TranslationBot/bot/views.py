@@ -13,6 +13,7 @@ from django.shortcuts import render
 from django.conf import settings
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
+from bot.models import *
 
 # Line-ChatBot related functions
 from linebot import (
@@ -121,9 +122,31 @@ def handle_message(event):
 
     target_lang = "en"
     
+    user_id = event.source.user_id
+    received_msg_time = event.timestamp
+    received_msg_time_dt = datetime.datetime.fromtimestamp(received_msg_time/1000.0)
     received_msg = event.message.text
+
     detect_lang, cfd = detect_language(received_msg) # detect the language
     map_lang = return_supported_languages(target_lang) # get the mapping of all supported laguage, and display the mapped name by detected language above
+
+
+    # TODO:
+    # 1. How to judge 
+    # create User's object
+    user_info = {
+        "user_id" : user_id,
+        "target_language" : detect_lang,
+    }
+    user_obj = User.create_obj_by_dict(**user_info)
+
+    # create message object and link its foreign-key to user-obj just created above 
+    msg_info = {
+        "message" : received_msg,
+        "message_time" : received_msg_time_dt,
+        "user" : user_obj, 
+    }
+    Message.create_obj_by_dict(**msg_info)
 
     # Only do translation in case detected language is differ from target one; Else return the origonal contents.
     if detect_lang != target_lang:
@@ -136,14 +159,14 @@ def handle_message(event):
             target_language_code = target_lang,
         )
         #result = client.translate(received_msg, target_language="en")
-        text = f"({map_lang[target_lang]})" + str(response.translations[0].translated_text)
+        translated_msg = f"({map_lang[target_lang]})" + str(response.translations[0].translated_text)
 
     else:
-        text = f"({map_lang[target_lang]})" + received_msg
+        translated_msg = f"({map_lang[target_lang]})" + received_msg
 
-    # text = str(event)
+    #translated_msg = str(event.timestamp)
 
-    reply_action = [TextSendMessage(text=text)]
+    reply_action = [TextSendMessage(text=translated_msg)]
     line_bot_api.reply_message(
         event.reply_token,
         reply_action
