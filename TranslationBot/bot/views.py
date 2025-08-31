@@ -27,6 +27,7 @@ from linebot.models import (
     MessageEvent, # message  event
     PostbackEvent, # postback event
     FollowEvent, # follow event
+    JoinEvent, # join event 
 
     # Receive message
     TextMessage ,
@@ -58,6 +59,29 @@ LINE_CHANNEL_SECRET = config['secret']['channel_secret']
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) # set line bot api
 handler = WebhookHandler(LINE_CHANNEL_SECRET) # set handle
 
+@csrf_exempt
+def callback(request):
+
+    if request.method == 'POST':
+
+        signature = request.META['HTTP_X_LINE_SIGNATURE']
+        body = request.body.decode('utf-8')
+
+        try:
+            handler.handle( body , signature )
+
+        except InvalidSignatureError:
+            print("DEBUG : InvalidSignatureError!!!")
+            return HttpResponseForbidden()
+        except LineBotApiError:
+            print("DEBUG : LineBotApiError!!!")
+            return HttpResponseBadRequest()
+
+        return HttpResponse()
+
+    else:
+        print("DEBUG : HttpResponseBadRequest!!!")
+        return HttpResponseBadRequest()
 
 # Detect the language based on the text input 
 def detect_language(text):
@@ -83,31 +107,25 @@ def return_supported_languages(display_language_code):
         
     return lang_map
 
+@handler.add(JoinEvent)
+def handle_follow_event(event):
 
-@csrf_exempt
-def callback(request):
+    group_id = event.source.group_id
+    group_establish_time = event.timestamp
+    group_establish_time_dt = datetime.datetime.fromtimestamp(group_establish_time/1000.0)
 
-    if request.method == 'POST':
+    group_info = {
+        "group_id" : group_id,
+        "establish_time" : group_establish_time_dt, 
+    }
+    group_obj = Group.create_obj_by_dict(**group_info)
 
-        signature = request.META['HTTP_X_LINE_SIGNATURE']
-        body = request.body.decode('utf-8')
-
-        try:
-            handler.handle( body , signature )
-
-        except InvalidSignatureError:
-            print("DEBUG : InvalidSignatureError!!!")
-            return HttpResponseForbidden()
-        except LineBotApiError:
-            print("DEBUG : LineBotApiError!!!")
-            return HttpResponseBadRequest()
-
-        return HttpResponse()
-
-    else:
-        print("DEBUG : HttpResponseBadRequest!!!")
-        return HttpResponseBadRequest()
-
+    join_text = f"Welcome to this chat group and the group id is : {group_id}"
+    reply_action = [TextSendMessage(text=join_text)]
+    line_bot_api.reply_message(
+        event.reply_token,
+        reply_action
+    )
 
 @handler.add(MessageEvent, message=[TextMessage , StickerMessage])
 def handle_message(event):
@@ -120,6 +138,11 @@ def handle_message(event):
         :return: None
     '''
 
+    # TODO:
+    # To determine the mechanism of how opposite site know and how to get the target language from my site? 
+    # Normally the message should be sent by opposite site, how do the bot know the target language of my site?
+    # Set up a new feature called the "translated language now" in model ChatBot_Status???
+
     target_lang = "en"
     
     user_id = event.source.user_id
@@ -130,9 +153,6 @@ def handle_message(event):
     detect_lang, cfd = detect_language(received_msg) # detect the language
     map_lang = return_supported_languages(target_lang) # get the mapping of all supported laguage, and display the mapped name by detected language above
 
-
-    # TODO:
-    # 1. How to judge 
     # create User's object
     user_info = {
         "user_id" : user_id,
@@ -140,13 +160,22 @@ def handle_message(event):
     }
     user_obj = User.create_obj_by_dict(**user_info)
 
-    # create message object and link its foreign-key to user-obj just created above 
+    # Create a Message's object and link it to User
     msg_info = {
         "message" : received_msg,
         "message_time" : received_msg_time_dt,
-        "user" : user_obj, 
+        "user" : user_obj, # link message to user
     }
-    Message.create_obj_by_dict(**msg_info)
+    msg_obj = Message.create_obj_by_dict(**msg_info)
+
+    # Check if User is in specific Group or not, If yes, link Group to User & link Message to Group  ; If not, skip it.
+    if "group_id" in vars(event.source):
+        group_id = event.source.group_id # check if group attributes exist
+        group_obj = Group.objects.get(group_id=group_id)   # If exists, get the group object of this chat group ,aim to point the foreign-key of User to Group
+        user_obj.group.add(group_obj) # link Group to User # Could not add Group obj when creating a instance in ManyToMany Field (Note that in ManyToOne Field, it could!). See:  https://stackoverflow.com/questions/50015204/direct-assignment-to-the-forward-side-of-a-many-to-many-set-is-prohibited-use-e
+        group_obj.message.add(msg_obj) # link Message to Group 
+
+
 
     # Only do translation in case detected language is differ from target one; Else return the origonal contents.
     if detect_lang != target_lang:
@@ -164,7 +193,7 @@ def handle_message(event):
     else:
         translated_msg = f"({map_lang[target_lang]})" + received_msg
 
-    #translated_msg = str(event.timestamp)
+    #translated_msg = str( "group_id" in vars(event.source))
 
     reply_action = [TextSendMessage(text=translated_msg)]
     line_bot_api.reply_message(
