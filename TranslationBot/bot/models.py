@@ -12,12 +12,28 @@ import datetime
 # Create a model represent the every chat, parameters includes the text, laguage of text, timestamp of sent text, User_id; And remember link this to the Users' status model (Multiples to one, ForeignKey=User)
 # 
 
+class ChatBot_state(models.Model):
+
+    # The current modes(could be multiples, but some of them are mutually exclusive!) that the chatbot have
+    translation_mode = models.CharField(default="dynamic", verbose_name='translation_mode') # mode of translation bot ; could be  dynamic or static
+    # dynamic mode represent the real-time translation during chatiing.
+    # static mode represent the single word translation.
+
+    @classmethod
+    def create_obj_by_dict(cls, **info_dict):
+        # basic attribute
+        obj = cls(**info_dict)
+        if obj not in cls.objects.all():
+            obj.save()  # if not has same data in database , update it .
+        return obj
+
 class Group(models.Model):
 
     # user information
     group_id = models.CharField(max_length=100, null=True ,blank=True ,default=None)
     establish_date = models.DateField(default=datetime.date.today)  # the date client send message
     establish_time = models.TimeField(null=True, blank=True)  # the time client send message
+    state = models.OneToOneField(ChatBot_state, null=True, blank=True, on_delete=models.CASCADE) # TODO: why primary key used ? https://stackoverflow.com/questions/69054979/why-would-someone-set-primary-key-true-on-an-one-to-one-reationship-onetoonefie
 
     @classmethod
     def create_obj_by_dict(cls, **info_dict):
@@ -90,16 +106,3 @@ class Message(models.Model):
         return obj
 
 
-class ChatBot_Status(models.Model):
-
-    # The current modes(could be multiples, but some of them are mutually exclusive!) that the chatbot have
-    dynamic_translation_mode = models.BooleanField(default=True, verbose_name='dynamic_mode') # For dynamic translation for multi-person chatting
-    static_translation_mode = models.BooleanField(default=False, verbose_name='static_mode') # For single words translation to Chinese
-
-    @classmethod
-    def create_obj_by_dict(cls, **info_dict):
-        # basic attribute
-        obj = cls(**info_dict)
-        if obj not in cls.objects.all():
-            obj.save()  # if not has same data in database , update it .
-        return obj

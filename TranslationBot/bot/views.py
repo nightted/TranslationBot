@@ -109,7 +109,15 @@ def return_supported_languages(display_language_code):
 
 @handler.add(JoinEvent)
 def handle_follow_event(event):
+    
 
+    # Generate ChatBot_state instance
+    state_info = {
+        "translation_mode" : "dynamic",
+    }
+    state_obj = ChatBot_state.create_obj_by_dict(**state_info)
+
+    # Generate Group instance
     group_id = event.source.group_id
     group_establish_time = event.timestamp
     group_establish_time_dt = datetime.datetime.fromtimestamp(group_establish_time/1000.0)
@@ -117,9 +125,11 @@ def handle_follow_event(event):
     group_info = {
         "group_id" : group_id,
         "establish_time" : group_establish_time_dt, 
+        "state" : state_obj,
     }
     group_obj = Group.create_obj_by_dict(**group_info)
 
+    # Return the Join message
     join_text = f"Welcome to this chat group and the group id is : {group_id}"
     reply_action = [TextSendMessage(text=join_text)]
     line_bot_api.reply_message(
@@ -143,24 +153,24 @@ def handle_message(event):
     # Normally the message should be sent by opposite site, how do the bot know the target language of my site?
     # Set up a new feature called the "translated language now" in model ChatBot_Status???
 
-    target_lang = "en"
+    translated_lang = "en"
     
-    user_id = event.source.user_id
-    received_msg_time = event.timestamp
-    received_msg_time_dt = datetime.datetime.fromtimestamp(received_msg_time/1000.0)
-    received_msg = event.message.text
 
-    detect_lang, cfd = detect_language(received_msg) # detect the language
-    map_lang = return_supported_languages(target_lang) # get the mapping of all supported laguage, and display the mapped name by detected language above
+
+    # get received message and detect its language
+    received_msg = event.message.text
+    detect_lang, cfd = detect_language(received_msg)
 
     # create User's object
+    user_id = event.source.user_id
     user_info = {
         "user_id" : user_id,
-        "target_language" : detect_lang,
+        "target_language" : detect_lang, # based on language of received message 
     }
     user_obj = User.create_obj_by_dict(**user_info)
 
     # Create a Message's object and link it to User
+    received_msg_time_dt = datetime.datetime.fromtimestamp(event.timestamp/1000.0)
     msg_info = {
         "message" : received_msg,
         "message_time" : received_msg_time_dt,
@@ -170,28 +180,28 @@ def handle_message(event):
 
     # Check if User is in specific Group or not, If yes, link Group to User & link Message to Group  ; If not, skip it.
     if "group_id" in vars(event.source):
+
         group_id = event.source.group_id # check if group attributes exist
         group_obj = Group.objects.get(group_id=group_id)   # If exists, get the group object of this chat group ,aim to point the foreign-key of User to Group
         user_obj.group.add(group_obj) # link Group to User # Could not add Group obj when creating a instance in ManyToMany Field (Note that in ManyToOne Field, it could!). See:  https://stackoverflow.com/questions/50015204/direct-assignment-to-the-forward-side-of-a-many-to-many-set-is-prohibited-use-e
         group_obj.message.add(msg_obj) # link Message to Group 
 
-
-
     # Only do translation in case detected language is differ from target one; Else return the origonal contents.
-    if detect_lang != target_lang:
+    map_lang = return_supported_languages(translated_lang) # get the mapping of all supported laguage, and display the mapped name by language will be translated
+    if detect_lang != translated_lang:
 
         response = client.translate_text(
             contents=[received_msg],
             parent=parent,
             mime_type=mime_type,
             source_language_code = detect_lang,
-            target_language_code = target_lang,
+            target_language_code = translated_lang,
         )
         #result = client.translate(received_msg, target_language="en")
-        translated_msg = f"({map_lang[target_lang]})" + str(response.translations[0].translated_text)
+        translated_msg = f"({map_lang[translated_lang]})" + str(response.translations[0].translated_text)
 
     else:
-        translated_msg = f"({map_lang[target_lang]})" + received_msg
+        translated_msg = f"({map_lang[translated_lang]})" + received_msg
 
     #translated_msg = str( "group_id" in vars(event.source))
 
