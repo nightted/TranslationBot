@@ -119,9 +119,7 @@ def handle_follow_event(event):
 
     # Generate Group instance
     group_id = event.source.group_id
-    group_establish_time = event.timestamp
-    group_establish_time_dt = datetime.datetime.fromtimestamp(group_establish_time/1000.0)
-
+    group_establish_time_dt = datetime.datetime.fromtimestamp(event.timestamp/1000.0)
     group_info = {
         "group_id" : group_id,
         "establish_time" : group_establish_time_dt, 
@@ -149,13 +147,6 @@ def handle_message(event):
     '''
 
     # TODO:
-    # To determine the mechanism of how opposite site know and how to get the target language from my site? 
-    # Normally the message should be sent by opposite site, how do the bot know the target language of my site?
-    # Set up a new feature called the "translated language now" in model ChatBot_Status???
-
-    translated_lang = "en"
-    
-
 
     # get received message and detect its language
     received_msg = event.message.text
@@ -186,27 +177,35 @@ def handle_message(event):
         user_obj.group.add(group_obj) # link Group to User # Could not add Group obj when creating a instance in ManyToMany Field (Note that in ManyToOne Field, it could!). See:  https://stackoverflow.com/questions/50015204/direct-assignment-to-the-forward-side-of-a-many-to-many-set-is-prohibited-use-e
         group_obj.message.add(msg_obj) # link Message to Group 
 
-    # Only do translation in case detected language is differ from target one; Else return the origonal contents.
-    map_lang = return_supported_languages(translated_lang) # get the mapping of all supported laguage, and display the mapped name by language will be translated
-    if detect_lang != translated_lang:
+    # Judge whether need to do translation or not.
+    # If no user objects with different languages is found(or it's truely empty, while the chatroom is just established); Then DO NOT do translations.
+    # Otherwise do translations.
+    user_other_objs = User.objects.exclude(target_language=detect_lang) # Get all language except the User's itself. These languages will be treated as "translated" languages.
+    if user_other_objs.exists():
 
-        response = client.translate_text(
-            contents=[received_msg],
-            parent=parent,
-            mime_type=mime_type,
-            source_language_code = detect_lang,
-            target_language_code = translated_lang,
+        translated_langs = []
+        for user_other_obj in user_other_objs:
+            tar_lang = user_other_obj.target_language 
+            if tar_lang not in translated_langs:
+                translated_langs.append(tar_lang)
+
+        for translated_lang in translated_langs:
+            map_lang = return_supported_languages(translated_lang) # get the mapping of all supported laguage, and display the mapped name by language will be translated
+            response = client.translate_text(
+                contents=[received_msg],
+                parent=parent,
+                mime_type=mime_type,
+                source_language_code = detect_lang,
+                target_language_code = translated_lang,
+            )
+            #result = client.translate(received_msg, target_language="en")
+            translated_msg = f"({map_lang[translated_lang]})" + str(response.translations[0].translated_text)
+            translated_msg+= "\n"
+
+        #translated_msg = str( "group_id" in vars(event.source))
+
+        reply_action = [TextSendMessage(text=translated_msg)]
+        line_bot_api.reply_message(
+            event.reply_token,
+            reply_action
         )
-        #result = client.translate(received_msg, target_language="en")
-        translated_msg = f"({map_lang[translated_lang]})" + str(response.translations[0].translated_text)
-
-    else:
-        translated_msg = f"({map_lang[translated_lang]})" + received_msg
-
-    #translated_msg = str( "group_id" in vars(event.source))
-
-    reply_action = [TextSendMessage(text=translated_msg)]
-    line_bot_api.reply_message(
-        event.reply_token,
-        reply_action
-    )
