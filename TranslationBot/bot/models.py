@@ -92,7 +92,8 @@ class Message(models.Model):
 
     message = models.CharField(max_length=100, null=True ,blank=True ,default=None) # the message client send
     message_date = models.DateField(default=datetime.date.today)  # the date client send message
-    message_time = models.TimeField(null=True, blank=True)  # the time client send message
+    message_time = models.TimeField(default=datetime.datetime.now , null=True, blank=True)  # the time client send message ??? default ???
+    language = models.CharField(max_length=100, null=True ,blank=True ,default=None) # the language of message
 
     user = models.ForeignKey(User , on_delete=models.CASCADE , related_name='message' ,blank=True, null=True)
     group = models.ForeignKey(Group , on_delete=models.CASCADE , related_name='message' ,blank=True, null=True)
@@ -104,5 +105,3 @@ class Message(models.Model):
         if obj not in cls.objects.all():
             obj.save()  # if not has same data in database , update it .
         return obj
-
-

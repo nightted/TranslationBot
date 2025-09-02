@@ -42,6 +42,15 @@ from linebot.models import (
 
 )
 
+
+# TODO:
+# 1. Chat history summary 
+# 2. Static translation (Single word translation & query), and save it to database to have opportunity to review.
+# 3. (Done) Also add one attribute : "language" inside Message model , and that could be extract from "detect_lang" variable.
+# 4. (Denied, No need to do it) Also store translated message into database, set up a new model type "Message_translated" and have OneToOne relationship to Message,
+#    since that will be more convenient and efficient to have chat summary, could just link the Message to Message_translated through OneToOne relationship.
+
+
 # Google Cloud translate settings
 project_id = "gen-lang-client-0876463969"
 parent = f"projects/{project_id}"
@@ -151,8 +160,10 @@ def handle_message(event):
     # get received message and detect its language
     received_msg = event.message.text
     detect_lang, cfd = detect_language(received_msg)
+    if detect_lang == "zh-CN":
+        detect_lang = "zh-TW"
 
-    # create User's object
+    # create User's instance
     user_id = event.source.user_id
     user_info = {
         "user_id" : user_id,
@@ -160,12 +171,13 @@ def handle_message(event):
     }
     user_obj = User.create_obj_by_dict(**user_info)
 
-    # Create a Message's object and link it to User
+    # Create a Message's instance and link it to User
     received_msg_time_dt = datetime.datetime.fromtimestamp(event.timestamp/1000.0)
     msg_info = {
         "message" : received_msg,
         "message_time" : received_msg_time_dt,
         "user" : user_obj, # link message to user
+        "language" : detect_lang ,
     }
     msg_obj = Message.create_obj_by_dict(**msg_info)
 
@@ -177,18 +189,29 @@ def handle_message(event):
         user_obj.group.add(group_obj) # link Group to User # Could not add Group obj when creating a instance in ManyToMany Field (Note that in ManyToOne Field, it could!). See:  https://stackoverflow.com/questions/50015204/direct-assignment-to-the-forward-side-of-a-many-to-many-set-is-prohibited-use-e
         group_obj.message.add(msg_obj) # link Message to Group 
 
+
+    # TODO list here: 
+    # 1.(Done) Add filter of Group for user_other_objs, or it will get other users in other group!!
+    # 2. Note that for single chat with bot doesn't have group_id attribute! In that case, default set the translated_langs as "en".
+
     # Judge whether need to do translation or not.
     # If no user objects with different languages is found(or it's truely empty, while the chatroom is just established); Then DO NOT do translations.
     # Otherwise do translations.
-    user_other_objs = User.objects.exclude(target_language=detect_lang) # Get all language except the User's itself. These languages will be treated as "translated" languages.
+    
+    reply_action = []
+    user_other_objs = User.objects.exclude(target_language=detect_lang).filter(group=group_obj) # Get all language except the User's itself. These languages will be treated as "translated" languages.
     if user_other_objs.exists():
-
+        
+        # extract all language need to be translated based on other Users
         translated_langs = []
         for user_other_obj in user_other_objs:
             tar_lang = user_other_obj.target_language 
             if tar_lang not in translated_langs:
                 translated_langs.append(tar_lang)
 
+        # Do:
+        # 1. Translations by Cloud Translation API and append them into reply_action one-by-one
+        # 2. Create the Message instances for translated messages.
         for translated_lang in translated_langs:
             map_lang = return_supported_languages(translated_lang) # get the mapping of all supported laguage, and display the mapped name by language will be translated
             response = client.translate_text(
@@ -198,14 +221,25 @@ def handle_message(event):
                 source_language_code = detect_lang,
                 target_language_code = translated_lang,
             )
-            #result = client.translate(received_msg, target_language="en")
+
             translated_msg = f"({map_lang[translated_lang]})" + str(response.translations[0].translated_text)
-            translated_msg+= "\n"
+            reply_action.append(TextSendMessage(text=translated_msg))
 
-        #translated_msg = str( "group_id" in vars(event.source))
+            # Create translated Message's instance and link it to User and Group
+            msg_traslated_info = {
+                "message" : translated_msg,
+                "user" : user_obj, # link message to user
+                "language" : translated_lang , # ??? multi language
+            }
+            msg_translated_obj = Message.create_obj_by_dict(**msg_info) 
+            group_obj.message.add(msg_translated_obj) # link Message to Group
+        
+        translated_msg = str( "group_id" in vars(event.source))
 
-        reply_action = [TextSendMessage(text=translated_msg)]
         line_bot_api.reply_message(
             event.reply_token,
             reply_action
         )
+
+    else:
+        pass
